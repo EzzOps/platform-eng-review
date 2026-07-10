@@ -112,7 +112,7 @@ jobs:
           CNCF_RESULTS: ${{ toJSON(needs.cncf-review.outputs.results) }}
           QUALITY_RESULTS: ${{ toJSON(needs.quality-review.outputs.results) }}
         run: python3 .github/workflows/scripts/write-outputs.py
-      - name: Aggregate
+      - name: Aggregate and post comment
         id: aggregate
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -123,16 +123,12 @@ jobs:
           HEAD_SHA: ${{ github.sha }}
         run: |
           FILES=$(git diff --name-only origin/$BASE_REF...$HEAD_SHA | tr '\n' ' ' || echo "")
-          python3 .github/workflows/scripts/aggregate.py /tmp/security-review.json /tmp/cncf-review.json /tmp/quality-review.json $FILES
-      - name: Post PR comment
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          REPO: ${{ github.repository }}
-        run: |
+          COMMENT=$(python3 .github/workflows/scripts/aggregate.py /tmp/security-review.json /tmp/cncf-review.json /tmp/quality-review.json $FILES 2>&1)
+          echo "Comment body generated"
+          # Post comment via GitHub API
           BODY=$(python3 -c "import json; print(json.dumps({'body': open('/tmp/pr-review-comment.md').read()}))")
           curl -s -X POST \
-            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Authorization: Bearer $GITHUB_TOKEN" \
             -H "Accept: application/vnd.github+json" \
             "https://api.github.com/repos/$REPO/issues/$PR_NUMBER/comments" \
             -d "$BODY"
