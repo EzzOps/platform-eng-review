@@ -1,0 +1,38 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: insecure-app
+  labels:
+    app: insecure-app
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: insecure-app
+  template:
+    metadata:
+      labels:
+        app: insecure-app
+    spec:
+      containers:
+      - name: app
+        image: myapp:latest
+        ports:
+        - containerPort: 8080
+        env:
+        - name: DATABASE_URL
+          value: "postgres://user:password@localhost:5432/db"
+        - name: SECRET_KEY
+          value: "abc123def456"
+        command: ["python", "app.py"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: insecure-app-svc
+spec:
+  selector:
+    app: insecure-app
+  ports:
+  - port: 80
+    targetPort: 8080

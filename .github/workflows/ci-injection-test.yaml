@@ -1,0 +1,17 @@
+# GitHub Actions workflow - testing CI/CD injection pattern
+name: CI
+on:
+  pull_request_target:
+    types: [opened, synchronize]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - name: Run tests
+        run: |
+          echo "Running tests for PR from ${{ github.event.pull_request.user.login }}"
+          make test

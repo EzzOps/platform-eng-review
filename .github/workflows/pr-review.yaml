@@ -1,0 +1,124 @@
+name: PR Multi-Agent Review
+on:
+  pull_request:
+    types: [opened, synchronize]
+
+permissions:
+  contents: read
+  pull-requests: write
+  checks: write
+
+jobs:
+  # ── Parallel review jobs ──────────────────────────────────────────
+  security-review:
+    runs-on: ubuntu-latest
+    outputs:
+      results: ${{ steps.review.outputs.results }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Get changed files
+        id: files
+        run: |
+          echo "files=$(git diff --name-only origin/${{ github.base_ref }}...${{ github.sha }} | jq -R -s -c 'split(\"\n\") | map(select(length > 0))')" >> $GITHUB_OUTPUT
+      - name: Security Review
+        id: review
+        run: |
+          FILES=$(git diff --name-only origin/${{ github.base_ref }}...${{ github.sha }} | tr '\n' ' ')
+          if [ -z "$FILES" ]; then
+            echo 'results={"status":"skipped","findings":[],"count":0}' >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          python3 .github/workflows/scripts/security-review.py $FILES > /tmp/security-review.json
+          echo "results=$(cat /tmp/security-review.json)" >> $GITHUB_OUTPUT
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+
+  cncf-review:
+    runs-on: ubuntu-latest
+    outputs:
+      results: ${{ steps.review.outputs.results }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: CNCF Best Practices Review
+        id: review
+        run: |
+          FILES=$(git diff --name-only origin/${{ github.base_ref }}...${{ github.sha }} | tr '\n' ' ')
+          if [ -z "$FILES" ]; then
+            echo 'results={"status":"skipped","findings":[],"count":0}' >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          python3 .github/workflows/scripts/cncf-review.py $FILES > /tmp/cncf-review.json
+          echo "results=$(cat /tmp/cncf-review.json)" >> $GITHUB_OUTPUT
+
+  quality-review:
+    runs-on: ubuntu-latest
+    outputs:
+      results: ${{ steps.review.outputs.results }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Code Quality Review
+        id: review
+        run: |
+          FILES=$(git diff --name-only origin/${{ github.base_ref }}...${{ github.sha }} | tr '\n' ' ')
+          if [ -z "$FILES" ]; then
+            echo 'results={"status":"skipped","findings":[],"count":0}' >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          python3 .github/workflows/scripts/quality-review.py $FILES > /tmp/quality-review.json
+          echo "results=$(cat /tmp/quality-review.json)" >> $GITHUB_OUTPUT
+
+  # ── Aggregate & Post Comment ──────────────────────────────────────
+  aggregate-review:
+    needs: [security-review, cncf-review, quality-review]
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Save review outputs
+        run: |
+          echo '${{ needs.security-review.outputs.results }}' > /tmp/security-review.json
+          echo '${{ needs.cncf-review.outputs.results }}' > /tmp/cncf-review.json
+          echo '${{ needs.quality-review.outputs.results }}' > /tmp/quality-review.json
+      - name: Aggregate and post comment
+        id: aggregate
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+          PR_SHA: ${{ github.sha }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          FILES=$(git diff --name-only origin/${{ github.base_ref }}...${{ github.sha }} | tr '\n' ' ' || echo "")
+          python3 .github/workflows/scripts/aggregate.py /tmp/security-review.json /tmp/cncf-review.json /tmp/quality-review.json $FILES
+      - name: Post PR comment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const comment = fs.readFileSync('/tmp/pr-review-comment.md', 'utf8');
+            await github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comment
+            });
