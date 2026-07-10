@@ -1,0 +1,44 @@
+# Intentionally problematic ingress example for test PR
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: test-ingress
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: myapp.example.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: myapp-svc
+            port:
+              number: 80
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ingress-controller
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ingress
+    template:
+      metadata:
+        labels:
+          app: ingress
+      spec:
+        containers:
+        - name: controller
+          image: nginx-ingress:latest
+          ports:
+          - containerPort: 80
+          env:
+          - name: DEBUG
+            value: "true"
+        - name: sidecar
+          image: busybox
+          command: ["sleep", "3600"]
